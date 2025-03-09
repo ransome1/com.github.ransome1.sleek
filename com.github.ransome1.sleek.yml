@@ -22,7 +22,8 @@ modules:
         XDG_CACHE_HOME: /run/build/sleek/flatpak-node/cache
     buildsystem: simple
     build-commands:
-      - npm install --offline
+      - npm config set cache /run/build/sleek/flatpak-node/cache
+      - npm install --cache /run/build/sleek/flatpak-node/cache --prefer-offline
       - |
         . flatpak-node/electron-builder-arch-args.sh
         npm run --offline build:unpack -- $ELECTRON_BUILDER_ARCH_ARGS
