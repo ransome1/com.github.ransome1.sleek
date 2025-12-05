@@ -7,11 +7,16 @@ base-version: '25.08'
 command: sleek
 finish-args:
   - --share=ipc
-  - --socket=x11
+  - --socket=wayland
+  - --socket=fallback-x11
   - --device=dri
   - --share=network
   - --talk-name=org.freedesktop.Notifications
   - --talk-name=org.freedesktop.FileChooser
+  # Tray icon on Wayland
+  - --talk-name=org.kde.StatusNotifierWatcher
+  # Ensure correct cursor size on Wayland
+  - --env=XCURSOR_PATH=/run/host/user-share/icons:/run/host/share/icons
 sdk-extensions:
   - org.freedesktop.Sdk.Extension.node20
 modules:
@@ -34,7 +39,14 @@ modules:
       - type: script
         dest-filename: sleek-entrypoint.sh
         commands:
-          - exec env TMPDIR=$XDG_CACHE_HOME zypak-wrapper /app/opt/sleek/sleek "$@"
+          - |
+            #!/bin/bash
+            export TMPDIR="${XDG_CACHE_HOME:-/tmp}"
+            if [ -n "$WAYLAND_DISPLAY" ] && [ "$XDG_SESSION_TYPE" = "wayland" ]; then
+              exec zypak-wrapper /app/opt/sleek/sleek --ozone-platform=wayland "$@"
+            else
+              exec zypak-wrapper /app/opt/sleek/sleek "$@"
+            fi
       - type: file
         dest-filename: com.github.ransome1.sleek.deb
         url: https://github.com/ransome1/sleek/releases/download/v2.0.22/sleek-2.0.22-linux-arm64.deb
