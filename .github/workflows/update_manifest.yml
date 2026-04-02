@@ -3,6 +3,7 @@ name: Update manifest on new release
 on:
   repository_dispatch:
     types: [trigger-flathub-build]
+  workflow_dispatch:
 
 jobs:
   update-manifest:
@@ -14,19 +15,20 @@ jobs:
         run: |
           set -eux
 
-          # Release-Daten holen
           RELEASE=$(curl -fsSL "https://api.github.com/repos/ransome1/sleek/releases/latest")
           TAG=$(echo "$RELEASE" | jq -r '.tag_name')
           VERSION="${TAG#v}"
-          COMMIT="${{ github.event.client_payload.commit_id }}"
 
-          # .deb-Dateien herunterladen und SHA256 berechnen
+          COMMIT="${{ github.event.client_payload.commit_id }}"
+          if [ -z "$COMMIT" ]; then
+            COMMIT=$(curl -fsSL "https://api.github.com/repos/ransome1/sleek/git/ref/tags/${TAG}" | jq -r '.object.sha')
+          fi
+
           curl -fsSL -o arm64.deb "https://github.com/ransome1/sleek/releases/download/${TAG}/sleek-${VERSION}-linux-arm64.deb"
           curl -fsSL -o amd64.deb "https://github.com/ransome1/sleek/releases/download/${TAG}/sleek-${VERSION}-linux-amd64.deb"
           ARM64_SHA=$(sha256sum arm64.deb | awk '{print $1}')
           AMD64_SHA=$(sha256sum amd64.deb | awk '{print $1}')
 
-          # Manifest aktualisieren
           M="com.github.ransome1.sleek.yml"
           sed -i "s|commit: .*|commit: ${COMMIT}|" "$M"
           sed -i "s|url: .*linux-arm64.deb|url: https://github.com/ransome1/sleek/releases/download/${TAG}/sleek-${VERSION}-linux-arm64.deb|" "$M"
@@ -39,7 +41,7 @@ jobs:
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@v7
         with:
-          commit-message: "Update to ${{ github.event.client_payload.tag }}"
-          title: "Update to ${{ github.event.client_payload.tag }}"
+          commit-message: "Update to ${TAG}"
+          title: "Update to ${TAG}"
           branch: update-release
           delete-branch: true
