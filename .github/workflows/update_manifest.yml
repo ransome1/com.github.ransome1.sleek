@@ -1,18 +1,45 @@
-name: Update Flatpak manifest and commit
+name: Update manifest on new release
+
 on:
   repository_dispatch:
-    types:
-      - trigger-flathub-build
+    types: [trigger-flathub-build]
+
 jobs:
-  update_manifest:
+  update-manifest:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v2
-      - name: Update Manifest with Commit ID
+      - uses: actions/checkout@v4
+
+      - name: Update manifest
         run: |
-          COMMIT_ID="${{ toJson(github.event.client_payload.commit_id) }}"
-          echo "COMMIT_ID is: $COMMIT_ID"
-          bash update_manifest.sh "$COMMIT_ID"
-        env:
-          TRIGGER_FLATHUB_BUILD: ${{ secrets.TRIGGER_FLATHUB_BUILD }}
+          set -eux
+
+          # Release-Daten holen
+          RELEASE=$(curl -fsSL "https://api.github.com/repos/ransome1/sleek/releases/latest")
+          TAG=$(echo "$RELEASE" | jq -r '.tag_name')
+          VERSION="${TAG#v}"
+          COMMIT="${{ github.event.client_payload.commit_id }}"
+
+          # .deb-Dateien herunterladen und SHA256 berechnen
+          curl -fsSL -o arm64.deb "https://github.com/ransome1/sleek/releases/download/${TAG}/sleek-${VERSION}-linux-arm64.deb"
+          curl -fsSL -o amd64.deb "https://github.com/ransome1/sleek/releases/download/${TAG}/sleek-${VERSION}-linux-amd64.deb"
+          ARM64_SHA=$(sha256sum arm64.deb | awk '{print $1}')
+          AMD64_SHA=$(sha256sum amd64.deb | awk '{print $1}')
+
+          # Manifest aktualisieren
+          M="com.github.ransome1.sleek.yml"
+          sed -i "s|commit: .*|commit: ${COMMIT}|" "$M"
+          sed -i "s|url: .*linux-arm64.deb|url: https://github.com/ransome1/sleek/releases/download/${TAG}/sleek-${VERSION}-linux-arm64.deb|" "$M"
+          sed -i "s|url: .*linux-amd64.deb|url: https://github.com/ransome1/sleek/releases/download/${TAG}/sleek-${VERSION}-linux-amd64.deb|" "$M"
+          sed -i "/linux-arm64.deb/{n;s|sha256: .*|sha256: ${ARM64_SHA}|}" "$M"
+          sed -i "/linux-amd64.deb/{n;s|sha256: .*|sha256: ${AMD64_SHA}|}" "$M"
+
+          echo "Updated to ${TAG} (${COMMIT})"
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          commit-message: "Update to ${{ github.event.client_payload.tag }}"
+          title: "Update to ${{ github.event.client_payload.tag }}"
+          branch: update-release
+          delete-branch: true
