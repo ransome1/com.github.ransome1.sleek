@@ -1,18 +1,40 @@
-name: Update Flatpak manifest and commit
+name: Update manifest on new release
 on:
   repository_dispatch:
-    types:
-      - trigger-flathub-build
+    types: [trigger-flathub-build]
+  workflow_dispatch:
 jobs:
-  update_manifest:
+  update-manifest:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v2
-      - name: Update Manifest with Commit ID
+      - uses: actions/checkout@v4
+      - name: Update manifest
+        id: update
         run: |
-          COMMIT_ID="${{ toJson(github.event.client_payload.commit_id) }}"
-          echo "COMMIT_ID is: $COMMIT_ID"
-          bash update_manifest.sh "$COMMIT_ID"
-        env:
-          TRIGGER_FLATHUB_BUILD: ${{ secrets.TRIGGER_FLATHUB_BUILD }}
+          set -eux
+          RELEASE=$(curl -fsSL "https://api.github.com/repos/ransome1/sleek/releases/latest")
+          TAG=$(echo "$RELEASE" | jq -r '.tag_name')
+          VERSION="${TAG#v}"
+          COMMIT="${{ github.event.client_payload.commit_id }}"
+          if [ -z "$COMMIT" ]; then
+            COMMIT=$(curl -fsSL "https://api.github.com/repos/ransome1/sleek/git/ref/tags/${TAG}" | jq -r '.object.sha')
+          fi
+          curl -fsSL -o arm64.deb "https://github.com/ransome1/sleek/releases/download/${TAG}/sleek-${VERSION}-linux-arm64.deb"
+          curl -fsSL -o amd64.deb "https://github.com/ransome1/sleek/releases/download/${TAG}/sleek-${VERSION}-linux-amd64.deb"
+          ARM64_SHA=$(sha256sum arm64.deb | awk '{print $1}')
+          AMD64_SHA=$(sha256sum amd64.deb | awk '{print $1}')
+          M="com.github.ransome1.sleek.yml"
+          sed -i "s|commit: .*|commit: ${COMMIT}|" "$M"
+          sed -i "s|url: .*linux-arm64.deb|url: https://github.com/ransome1/sleek/releases/download/${TAG}/sleek-${VERSION}-linux-arm64.deb|" "$M"
+          sed -i "s|url: .*linux-amd64.deb|url: https://github.com/ransome1/sleek/releases/download/${TAG}/sleek-${VERSION}-linux-amd64.deb|" "$M"
+          sed -i "/linux-arm64.deb/{n;s|sha256: .*|sha256: ${ARM64_SHA}|}" "$M"
+          sed -i "/linux-amd64.deb/{n;s|sha256: .*|sha256: ${AMD64_SHA}|}" "$M"
+          echo "TAG=${TAG}" >> "$GITHUB_OUTPUT"
+          rm -f arm64.deb amd64.deb
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          commit-message: "Update to ${{ steps.update.outputs.TAG }}"
+          title: "Update to ${{ steps.update.outputs.TAG }}"
+          branch: update-release
+          delete-branch: true
